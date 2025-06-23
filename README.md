@@ -42,6 +42,16 @@ pig-detector-opencv/
 3. 训练结束后模型会保存在 `models/` 目录，并带有版本前缀，例如
    `models/v1_model.pth`。
 4. 如需在 Java 中使用，可执行 `python scripts/export_to_onnx.py` 导出 ONNX 模型。
+   该脚本会把网络前向和 NMS 后处理一起打包到 `model.onnx` 中，输出即为最终
+   的 `boxes`、`scores`、`labels` 张量，可直接在 Java 端解析。常用参数：
+
+   ```bash
+   python scripts/export_to_onnx.py \
+       --config config.yaml \
+       --weights models/best_model.pth \
+       --output models/model.onnx \
+       --conf 0.25 --iou 0.45 --top-k 100
+   ```
 5. 若希望通过 Docker 构建环境，可运行 `./build_docker.sh` 生成镜像。该脚本
    同样默认使用清华镜像安装依赖，构建完成后可通过
    `docker run -p 8000:8000 pig-detector` 启动 API 服务。
