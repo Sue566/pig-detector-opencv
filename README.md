@@ -17,13 +17,10 @@ pig-detector-opencv/
 │   └── val/
 │       ├── images/
 │       └── labels/
-├── pigdata/        # 额外的数据集，与 data/ 结构相同
-│   ├── train/
-│   │   ├── images/
-│   │   └── labels/
-│   └── val/
-│       ├── images/
-│       └── labels/
+├── pigdata/        # 额外的数据集，包含:
+│   ├── train_img/   # 训练图片
+│   ├── train_json/  # 与图片同名的标注 JSON
+│   └── test/        # 仅图片，可做验证集
 │
 ├── scripts/        # 训练与推理脚本
 │   ├── train.py
@@ -45,8 +42,9 @@ pig-detector-opencv/
 1. 执行 `VERSION=v1 ./start_train.sh`（首次运行会创建虚拟环境并安装依赖，
    脚本已使用清华镜像源加速安装，可按需修改）。版本号可自定义，便于后续
    在 API 中查询。
-2. 在 `config.yaml` 中配置数据集路径和训练参数。支持同时指定多个目录，示例已包含
-   `data/` 与新增的 `pigdata/`。
+2. 在 `config.yaml` 中配置数据集路径和训练参数。可同时指定多个目录，脚本会自动识别
+   结构。示例中除了 YOLO 格式的 `data/`，还包含 `pigdata/`（图片在 `train_img/`，标注
+   在 `train_json/`）。
 3. 训练结束后模型会保存在 `models/` 目录，并带有版本前缀，例如
    `models/v1_model.pth`。
 4. 如需在 Java 中使用，可执行 `python scripts/export_to_onnx.py` 导出 ONNX 模型。

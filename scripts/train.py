@@ -48,7 +48,7 @@ def train(args):
             "tqdm is not installed. Please install dependencies from requirements.txt"
         )
     # 延迟导入其余依赖，避免在仅查看 --help 时出错
-    from utils.dataset import YoloDataset
+    from utils.dataset import build_dataset
     from utils.model import create_model
     from utils.transforms import get_train_transforms
     logger = setup_logging("train")
@@ -56,14 +56,14 @@ def train(args):
     logger.info("Loading config from %s", args.config)
     cfg = load_config(args.config)
 
-    # 支持多个训练目录
+    # 支持多个训练目录，自动识别其结构
     train_dirs = cfg.get('train_dirs') or cfg.get('train_dir')
     if isinstance(train_dirs, (list, tuple)):
         from torch.utils.data import ConcatDataset
-        datasets = [YoloDataset(d, transforms=get_train_transforms()) for d in train_dirs]
+        datasets = [build_dataset(d, transforms=get_train_transforms()) for d in train_dirs]
         train_ds = ConcatDataset(datasets)
     else:
-        train_ds = YoloDataset(train_dirs, transforms=get_train_transforms())
+        train_ds = build_dataset(train_dirs, transforms=get_train_transforms())
 
     train_loader = DataLoader(train_ds, batch_size=cfg['batch_size'], shuffle=True, collate_fn=lambda x: tuple(zip(*x)))
 
