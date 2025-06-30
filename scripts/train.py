@@ -60,10 +60,15 @@ def train(args):
     train_dirs = cfg.get('train_dirs') or cfg.get('train_dir')
     if isinstance(train_dirs, (list, tuple)):
         from torch.utils.data import ConcatDataset
-        datasets = [build_dataset(d, transforms=get_train_transforms()) for d in train_dirs]
+        datasets = []
+        for d in train_dirs:
+            ds = build_dataset(d, transforms=get_train_transforms())
+            logger.info("Loaded %s with %d images", d, len(ds))
+            datasets.append(ds)
         train_ds = ConcatDataset(datasets)
     else:
         train_ds = build_dataset(train_dirs, transforms=get_train_transforms())
+        logger.info("Loaded %s with %d images", train_dirs, len(train_ds))
 
     train_loader = DataLoader(train_ds, batch_size=cfg['batch_size'], shuffle=True, collate_fn=lambda x: tuple(zip(*x)))
 

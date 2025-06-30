@@ -1,9 +1,10 @@
 # 训练参数示例
 train_dirs:
   - data/train
-  - pigdata
+  - pigdata/train
 val_dirs:
   - data/val
+  - pigdata/val
 num_classes: 1             # 仅检测猪
 batch_size: 4
 num_epochs: 10
