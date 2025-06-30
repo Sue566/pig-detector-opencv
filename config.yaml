@@ -4,6 +4,7 @@ train_dirs:
   - pigdata
 val_dirs:
   - data/val
+  - pigdata/val
 num_classes: 1             # 仅检测猪
 batch_size: 4
 num_epochs: 10

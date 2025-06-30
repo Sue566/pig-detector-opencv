@@ -125,7 +125,17 @@ class JsonDataset(Dataset):
 
 
 def build_dataset(root: str, transforms=None) -> Dataset:
-    """Auto-detect dataset type based on directory structure."""
+    """Auto-detect dataset type based on directory structure.
+
+    Supported layouts::
+
+        dataset/images/  dataset/labels/
+        dataset/train/images/  dataset/train/labels/
+        dataset/train_img/  dataset/train_json/ (JSON annotations)
+
+    When ``train`` and ``val`` folders are both present, pass each subdirectory
+    separately via ``train_dirs`` and ``val_dirs`` in the config.
+    """
     root_path = Path(root)
     if (root_path / "images").exists() and (root_path / "labels").exists():
         return YoloDataset(root, transforms=transforms)
