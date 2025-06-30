@@ -18,13 +18,27 @@ class YoloDataset(Dataset):
         imgs = []
         for ext in exts:
             imgs.extend((self.root / "images").glob(ext))
-        self.imgs = sorted(imgs)
-        self.labels = []
-        for img in self.imgs:
+        filtered_imgs = []
+        labels = []
+        for img in sorted(imgs):
             label = self.root / "labels" / f"{img.stem}.txt"
             if not label.exists():
                 raise FileNotFoundError(f"Label file not found for {img.name}")
-            self.labels.append(label)
+            # skip images without valid boxes to avoid training errors
+            has_box = False
+            with open(label, "r", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) == 5:
+                        _, cx, cy, w, h = parts
+                        if float(w) > 0 and float(h) > 0:
+                            has_box = True
+                            break
+            if has_box:
+                filtered_imgs.append(img)
+                labels.append(label)
+        self.imgs = filtered_imgs
+        self.labels = labels
 
     def __len__(self) -> int:
         return len(self.imgs)
@@ -51,8 +65,11 @@ class YoloDataset(Dataset):
                 y2 = min((cy + h / 2) * img.height, img.height)
                 if x2 > x1 and y2 > y1:
                     boxes.append([x1, y1, x2, y2])
+        boxes_tensor = torch.tensor(boxes, dtype=torch.float32)
+        if boxes_tensor.ndim == 1:
+            boxes_tensor = boxes_tensor.reshape(0, 4)
         target = {
-            "boxes": torch.tensor(boxes, dtype=torch.float32),
+            "boxes": boxes_tensor,
             "labels": torch.ones(len(boxes), dtype=torch.int64),
         }
         if self.transforms:
@@ -115,8 +132,11 @@ class JsonDataset(Dataset):
                     boxes = self._parse_boxes(data)
                 except Exception:
                     boxes = []
+        boxes_tensor = torch.tensor(boxes, dtype=torch.float32)
+        if boxes_tensor.ndim == 1:
+            boxes_tensor = boxes_tensor.reshape(0, 4)
         target = {
-            "boxes": torch.tensor(boxes, dtype=torch.float32),
+            "boxes": boxes_tensor,
             "labels": torch.ones(len(boxes), dtype=torch.int64),
         }
         if self.transforms:
