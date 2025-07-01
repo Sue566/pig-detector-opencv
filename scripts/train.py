@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 from datetime import datetime
+import shutil
 import sys
 
 
@@ -38,6 +39,49 @@ def load_config(path: str):
         return yaml.safe_load(f)
 
 
+def process_negative_images(cfg):
+    """Move negative images into the main training directory.
+
+    The config may specify ``negative_dir``; defaults to ``negative``.
+    Images are moved to the first directory listed in ``train_dirs`` with an
+    empty label file created alongside. Already-copied files are skipped.
+    """
+    neg_dir = Path(cfg.get("negative_dir", "negative"))
+    if not neg_dir.exists():
+        return 0
+
+    train_dirs = cfg.get("train_dirs") or cfg.get("train_dir")
+    if isinstance(train_dirs, (list, tuple)):
+        dest_root = Path(train_dirs[0])
+    else:
+        dest_root = Path(train_dirs)
+
+    images_dest = dest_root / "images"
+    labels_dest = dest_root / "labels"
+    images_dest.mkdir(parents=True, exist_ok=True)
+    labels_dest.mkdir(parents=True, exist_ok=True)
+
+    moved = 0
+    for img in neg_dir.iterdir():
+        if not img.is_file():
+            continue
+        dest_img = images_dest / img.name
+        dest_lbl = labels_dest / f"{img.stem}.txt"
+        if dest_img.exists():
+            img.unlink()
+            continue
+        shutil.move(str(img), dest_img)
+        dest_lbl.write_text("", encoding="utf-8")
+        moved += 1
+
+    # remove directory if empty
+    try:
+        neg_dir.rmdir()
+    except OSError:
+        pass
+    return moved
+
+
 def train(args):
     if torch is None:
         raise RuntimeError(
@@ -55,6 +99,10 @@ def train(args):
     logger.info("Training started")
     logger.info("Loading config from %s", args.config)
     cfg = load_config(args.config)
+
+    moved = process_negative_images(cfg)
+    if moved:
+        logger.info("Added %d negative images", moved)
 
     # 支持多个训练目录，自动识别其结构
     train_dirs = cfg.get('train_dirs') or cfg.get('train_dir')

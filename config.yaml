@@ -10,3 +10,4 @@ batch_size: 4
 num_epochs: 10
 learning_rate: 0.001
 model_dir: models
+negative_dir: negative

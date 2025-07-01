@@ -27,6 +27,10 @@ pig-detector-opencv/
 │   # ``build_dataset`` 会自动识别此布局
 │   # 训练时在 ``train_dirs`` 中添加 ``pigdata/train`` 即可
 │
+├── negative/      # 可选: 投入误检的非猪图片
+│   # 训练脚本会自动将此目录下的图片移动到第一
+│   # 个训练集目录，并创建空白标签文件作为负样本
+│
 ├── scripts/        # 训练与推理脚本
 │   ├── train.py
 │   ├── predict.py
@@ -49,7 +53,8 @@ pig-detector-opencv/
    在 API 中查询。
 2. 在 `config.yaml` 中配置数据集路径和训练参数。可同时指定多个目录，脚本会自动识别
  结构。示例同时使用 `data/train` 与 `pigdata/train` 两个目录进行训练，
- 验证集来自 `data/val` 与 `pigdata/val`。
+ 验证集来自 `data/val` 与 `pigdata/val`。若有误检图片，可放入 `negative/` 目录，
+ 训练脚本会在开始时自动移动并生成空白标签文件。
 3. 训练结束后模型会保存在 `models/` 目录，并带有版本前缀，例如
    `models/v1_model.pth`。
 4. 如需在 Java 中使用，可执行 `python scripts/export_to_onnx.py` 导出 ONNX 模型。

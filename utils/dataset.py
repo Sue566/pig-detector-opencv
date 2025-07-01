@@ -18,27 +18,16 @@ class YoloDataset(Dataset):
         imgs = []
         for ext in exts:
             imgs.extend((self.root / "images").glob(ext))
-        filtered_imgs = []
-        labels = []
+        self.imgs = []
+        self.labels = []
         for img in sorted(imgs):
             label = self.root / "labels" / f"{img.stem}.txt"
             if not label.exists():
                 raise FileNotFoundError(f"Label file not found for {img.name}")
-            # skip images without valid boxes to avoid training errors
-            has_box = False
-            with open(label, "r", encoding="utf-8") as f:
-                for line in f:
-                    parts = line.strip().split()
-                    if len(parts) == 5:
-                        _, cx, cy, w, h = parts
-                        if float(w) > 0 and float(h) > 0:
-                            has_box = True
-                            break
-            if has_box:
-                filtered_imgs.append(img)
-                labels.append(label)
-        self.imgs = filtered_imgs
-        self.labels = labels
+            # include images even if they contain no boxes so they can serve as
+            # negative samples during training
+            self.imgs.append(img)
+            self.labels.append(label)
 
     def __len__(self) -> int:
         return len(self.imgs)
