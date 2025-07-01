@@ -17,15 +17,12 @@ pig-detector-opencv/
 │   └── val/
 │       ├── images/
 │       └── labels/
-├── pigdata/        # 额外的数据集（YOLO 格式）
-│   ├── train/
-│   │   ├── images/
-│   │   └── labels/
-│   └── val/
-│       ├── images/
-│       └── labels/
+├── pigdata/        # 额外的数据集（JSON 标注）
+│   ├── train_img/      # 训练图片
+│   ├── train_json/     # 与图片同名的 .json 标注
+│   └── test/           # 测试图片，可选
 │   # ``build_dataset`` 会自动识别此布局
-│   # 训练时在 ``train_dirs`` 中添加 ``pigdata/train`` 即可
+│   # 训练时在 ``train_dirs`` 中添加 ``pigdata`` 即可
 │
 ├── negative/      # 可选: 投入误检的非猪图片
 │   # 训练脚本会自动将此目录下的图片移动到第一
@@ -52,8 +49,8 @@ pig-detector-opencv/
    脚本已使用清华镜像源加速安装，可按需修改）。版本号可自定义，便于后续
    在 API 中查询。如需在已有模型基础上继续训练，可设置 `RESUME=路径`。
 2. 在 `config.yaml` 中配置数据集路径和训练参数。可同时指定多个目录，脚本会自动识别
-结构。示例同时使用 `data/train` 与 `pigdata/train` 两个目录进行训练，
- 验证集来自 `data/val` 与 `pigdata/val`。若有误检图片，可放入 `negative/` 目录，
+结构。示例同时使用 `data/train` 与 `pigdata` 两个目录进行训练，
+ 验证集来自 `data/val`。若有误检图片，可放入 `negative/` 目录，
  训练脚本会在开始时自动移动并生成空白标签文件。
 3. 训练结束后模型会保存在 `models/` 目录，并带有版本前缀，例如
    `models/v1_model.pth`。若要在此基础上继续训练，可执行：
@@ -112,8 +109,9 @@ python scripts/predict.py --image https://example.com/pig.jpg
 ```
 若未检测到猪，脚本会打印 `Image does not contain pigs.` 以便区分无结果的情况。
 
-数据集采用 YOLO v5 标注格式，`utils.dataset.YoloDataset` 会在加载时将相对坐标
-转换为像素级的左上角、右下角坐标，以便传入 Faster R-CNN 模型训练。
+数据集默认采用 YOLO v5 标注格式，`utils.dataset.YoloDataset` 会在加载时将相对坐标
+转换为像素级的左上角、右下角坐标。若目录包含 `train_img/` 和 `train_json/`，则会
+使用 `JsonDataset` 解析 JSON 标注，两种格式均可直接传入 Faster R-CNN 模型训练。
 
 运行上述脚本时若仅查看 `--help` 信息，可在未安装深度学习依赖的情况下执行。
 真正训练或导出模型则需要提前安装 `torch`、`torchvision` 等依赖，确保环境支持 GPU

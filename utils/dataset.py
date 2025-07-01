@@ -152,4 +152,16 @@ def build_dataset(root: str, transforms=None) -> Dataset:
         return JsonDataset(root_path / "train_img", root_path / "train_json", transforms=transforms)
     if (root_path / "train" / "images").exists() and (root_path / "train" / "labels").exists():
         return YoloDataset(root_path / "train", transforms=transforms)
+    # allow passing "pigdata/train" when the actual layout is "pigdata/train_img"
+    # and "pigdata/train_json" for better compatibility
+    if (
+        root_path.name == "train"
+        and (root_path.parent / "train_img").exists()
+        and (root_path.parent / "train_json").exists()
+    ):
+        return JsonDataset(
+            root_path.parent / "train_img",
+            root_path.parent / "train_json",
+            transforms=transforms,
+        )
     raise ValueError(f"Unrecognized dataset structure at {root}")
