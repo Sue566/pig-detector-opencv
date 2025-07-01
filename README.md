@@ -50,13 +50,18 @@ pig-detector-opencv/
 ## 快速开始
 1. 执行 `VERSION=v1 ./start_train.sh`（首次运行会创建虚拟环境并安装依赖，
    脚本已使用清华镜像源加速安装，可按需修改）。版本号可自定义，便于后续
-   在 API 中查询。
+   在 API 中查询。如需在已有模型基础上继续训练，可设置 `RESUME=路径`。
 2. 在 `config.yaml` 中配置数据集路径和训练参数。可同时指定多个目录，脚本会自动识别
- 结构。示例同时使用 `data/train` 与 `pigdata/train` 两个目录进行训练，
+结构。示例同时使用 `data/train` 与 `pigdata/train` 两个目录进行训练，
  验证集来自 `data/val` 与 `pigdata/val`。若有误检图片，可放入 `negative/` 目录，
  训练脚本会在开始时自动移动并生成空白标签文件。
 3. 训练结束后模型会保存在 `models/` 目录，并带有版本前缀，例如
-   `models/v1_model.pth`。
+   `models/v1_model.pth`。若要在此基础上继续训练，可执行：
+
+   ```bash
+   python scripts/train.py --config config.yaml --version v2 \
+       --resume models/v1_model.pth
+   ```
 4. 如需在 Java 中使用，可执行 `python scripts/export_to_onnx.py` 导出 ONNX 模型。
    该脚本会把网络前向和 NMS 后处理一起打包到 `model.onnx` 中，输出即为最终
    的 `boxes`、`scores`、`labels` 张量，可直接在 Java 端解析。常用参数：

@@ -124,6 +124,16 @@ def train(args):
     model = create_model(cfg['num_classes'] + 1)  # +1 for background
     model.to(device)
 
+    if args.resume:
+        logger.info("Resuming from %s", args.resume)
+        data = torch.load(args.resume, map_location=device)
+        if isinstance(data, dict) and any(k in data for k in ('model', 'state_dict')):
+            state_dict = data.get('model') or data.get('state_dict')
+        else:
+            state_dict = data
+        model.load_state_dict(state_dict)
+        logger.info("Weights loaded")
+
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=cfg['learning_rate'], momentum=0.9, weight_decay=0.0005)
 
@@ -158,5 +168,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train pig detector')
     parser.add_argument('--config', default='config.yaml', help='Path to config file')
     parser.add_argument('--version', default='v1', help='Model version tag')
+    parser.add_argument('--resume', help='Path to existing weights to resume training from')
     args = parser.parse_args()
     train(args)
