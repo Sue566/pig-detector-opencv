@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import time
 import shutil
+import os
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -20,6 +21,7 @@ Image = None
 F = None
 estimate_length_weight = None
 requests = None
+cv2 = None
 
 
 def load_config(path: str):
@@ -54,7 +56,7 @@ def load_model(cfg_path: str, weight_path: str):
 
 def _ensure_deps_loaded():
     """Load heavy dependencies only when actually needed."""
-    global Image, F, estimate_length_weight
+    global Image, F, estimate_length_weight, cv2
     if Image is None or F is None:
         from PIL import Image as PILImage
         import torchvision.transforms.functional as TF
@@ -63,6 +65,14 @@ def _ensure_deps_loaded():
     if estimate_length_weight is None:
         from utils.estimate import estimate_length_weight as elw
         estimate_length_weight = elw
+    if cv2 is None:
+        try:
+            import importlib
+            cv2 = importlib.import_module('cv2')
+        except ImportError:
+            print("\n错误: 未安装OpenCV库。请运行以下命令安装:")
+            print("pip install opencv-python\n")
+            raise
 
 
 def _ensure_requests():
@@ -138,6 +148,54 @@ def predict_image(cfg_path: str, weight_path: str, image_path: str, *, conf: flo
     return predict_image_with_model(model, image_path, conf=conf, top_k=top_k)
 
 
+def draw_boxes_on_image(image_path, results, output_path=None):
+    """在图片上绘制检测结果的边界框
+    
+    参数:
+    image_path: 原始图片路径
+    results: 检测结果列表
+    output_path: 输出图片路径，如果为None则显示图片而不保存
+    """
+    try:
+        _ensure_deps_loaded()
+        
+        # 读取图片
+        img = cv2.imread(image_path)
+        if img is None:
+            print(f"无法读取图片: {image_path}")
+            return
+    
+        # 在图片上绘制边界框
+        for r in results:
+            x1, y1, x2, y2 = map(int, r['box'])  # 转换为整数坐标
+            score = r['score']
+            length = r['length']
+            weight = r['weight']
+            
+            # 绘制红色边界框
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            
+            # 添加文本标签
+            label = f"Pig: {score:.2f}, L:{length:.1f}, W:{weight:.1f}kg"
+            cv2.putText(img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        
+        # 保存或显示图片
+        if output_path:
+            # 确保输出路径有有效的图像扩展名
+            if not any(output_path.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']):
+                output_path = output_path + '.jpg'  # 添加默认扩展名
+            cv2.imwrite(output_path, img)
+            print(f"已保存标注图片到: {output_path}")
+        else:
+            # 显示图片
+            cv2.imshow("Detection Result", img)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+    except ImportError:
+        print("无法绘制边界框: 未安装OpenCV库")
+        print("请运行以下命令安装OpenCV:")
+        print("pip install opencv-python")
+
 def main(args):
     logger = setup_logging("predict")
     logger.info("Running prediction on %s", args.image)
@@ -146,6 +204,8 @@ def main(args):
         logger.info("Image does not contain pigs.")
         print("Image does not contain pigs.")
         return
+    
+    # 输出检测结果
     for r in results:
         x1, y1, x2, y2 = r['box']
         msg = (
@@ -153,6 +213,20 @@ def main(args):
         )
         logger.info(msg)
         print(msg)
+    
+    # 在图片上绘制边界框
+    if args.draw:
+        try:
+            if args.output:
+                # 保存到指定路径
+                draw_boxes_on_image(args.image, results, args.output)
+            else:
+                # 显示图片
+                draw_boxes_on_image(args.image, results)
+        except Exception as e:
+            logger.error(f"绘制边界框时出错: {e}")
+            print(f"绘制边界框时出错: {e}")
+            print("如果是OpenCV相关错误，请运行: pip install opencv-python")
 
 
 if __name__ == '__main__':
@@ -160,5 +234,7 @@ if __name__ == '__main__':
     parser.add_argument('--config', default='config.yaml')
     parser.add_argument('--weights', default='models/best_model.pth')
     parser.add_argument('--image', required=True)
+    parser.add_argument('--draw', action='store_true', help='在图片上绘制检测结果')
+    parser.add_argument('--output', help='保存标注后的图片路径')
     args = parser.parse_args()
     main(args)

@@ -1,12 +1,10 @@
-# 训练参数示例
 train_dirs:
-  - data/train
-  - pigdata
+  - dataset/train
 val_dirs:
-  - data/val
-num_classes: 1             # 仅检测猪
+  - dataset/val
+num_classes: 3             # 因为只有一个类别 "pig"
 batch_size: 4
-num_epochs: 10
+num_epochs: 50             # 10 太少了，50-100 比较合理
 learning_rate: 0.001
 model_dir: models
-negative_dir: negative
+negative_dir: dataset/negative   # 如果有负样本，写上

@@ -14,7 +14,7 @@ def estimate_length_weight(box: Tuple[float, float, float, float]) -> Tuple[floa
     -------
     Tuple[float, float]
         Estimated length and weight in kilograms. The calculation is
-        a rough guess; calibrate `SCALE_AREA_TO_WEIGHT` with real data
+        a rough guess; calibrate `SCALE_AREA_TO_WEIGHT` with real dataset
         for better accuracy.
     """
     x1, y1, x2, y2 = box

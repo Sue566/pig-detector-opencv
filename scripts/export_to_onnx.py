@@ -22,7 +22,18 @@ def load_config(path: str):
         return yaml.safe_load(f)
 
 
-def export(cfg_path: str, weights: str, output: str, conf: float = 0.25, iou: float = 0.45, top_k: int | None = 100):
+def export(cfg_path: str, weights: str, output: str, conf: float = 0.25, iou: float = 0.45, top_k = 100):
+    """
+    将PyTorch模型导出为ONNX格式
+    
+    参数:
+    cfg_path: 配置文件路径
+    weights: 模型权重文件路径
+    output: 输出ONNX文件路径
+    conf: 置信度阈值
+    iou: NMS IoU阈值
+    top_k: 最大检测数量，None表示不限制
+    """
     global torch
     if torch is None:
         import importlib
@@ -31,12 +42,21 @@ def export(cfg_path: str, weights: str, output: str, conf: float = 0.25, iou: fl
     import torchvision
     cfg = load_config(cfg_path)
     model = create_model(cfg['num_classes'] + 1)
-    state_dict = torch.load(weights, map_location='cpu')
+    
+    # 加载模型权重，处理不同的保存格式
+    data = torch.load(weights, map_location='cpu')
+    if isinstance(data, dict) and 'model' in data:
+        # 如果模型状态保存在'model'键下
+        state_dict = data['model']
+    else:
+        # 直接加载状态字典
+        state_dict = data
+    
     model.load_state_dict(state_dict)
     model.eval()
 
     class ModelWithNMS(torch.nn.Module):
-        def __init__(self, base: torch.nn.Module):
+        def __init__(self, base):
             super().__init__()
             self.base = base
 
