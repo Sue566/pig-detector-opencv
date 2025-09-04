@@ -44,6 +44,16 @@ pig-detector-opencv/
 └── README.md
 ```
 
+## 从头开始训练
+
+从头开始训练的命令:
+
+```bash
+python scripts/train.py --config config.yaml --version v1
+```
+
+这将使用config.yaml中的配置参数从头开始训练模型，并将版本标记为v1。
+
 ## 快速开始
 1. 执行 `VERSION=v1 ./start_train.sh`（首次运行会创建虚拟环境并安装依赖，
    脚本已使用清华镜像源加速安装，可按需修改）。版本号可自定义，便于后续
