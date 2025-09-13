@@ -12,3 +12,4 @@ logs/
 *.tar.gz
 dataset
 dataset/*
+*.tar

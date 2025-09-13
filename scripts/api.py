@@ -86,6 +86,16 @@ def predict(req: PredictRequest):
     }
 
 
+@app.get("/")
+def root():
+    """Return model version at root path"""
+    logger.info("/ called")
+    return {
+        "version": MODEL_META.get("version", "unknown"),
+        "trained_at": MODEL_META.get("trained_at", "unknown"),
+    }
+
+
 @app.get("/api/version")
 def version():
     """Return model version and training time if available."""
