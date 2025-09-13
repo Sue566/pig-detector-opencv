@@ -10,3 +10,5 @@ temp/
 logs/
 
 *.tar.gz
+dataset
+dataset/*
