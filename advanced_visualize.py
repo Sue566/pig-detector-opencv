@@ -6,6 +6,8 @@ from PIL import Image, ImageDraw, ImageFont
 import sys
 import os
 import math
+import requests
+from io import BytesIO
 
 def yolo_to_pixel(yolo_coords, img_width, img_height):
     """将YOLO格式坐标转换为像素坐标"""
@@ -99,12 +101,21 @@ def estimate_pig_weight(length_cm):
     
     return estimated_weight, (weight_min, weight_max)
 
+def _read_image_any(image_path):
+    """支持本地与URL读取，返回PIL.Image"""
+    if isinstance(image_path, str) and (image_path.startswith("http://") or image_path.startswith("https://")):
+        r = requests.get(image_path, timeout=15)
+        r.raise_for_status()
+        return Image.open(BytesIO(r.content)).convert("RGB")
+    else:
+        return Image.open(image_path).convert("RGB")
+
 def draw_detection_boxes(image_path, output_path=None):
     """在图片上绘制检测框并计算长度重量"""
     
     try:
-        # 读取图片
-        img = Image.open(image_path)
+        # 读取图片（本地或URL）
+        img = _read_image_any(image_path)
         img_width, img_height = img.size
         print(f"图片尺寸: {img_width} x {img_height}")
         
@@ -265,7 +276,7 @@ def draw_detection_boxes(image_path, output_path=None):
         return False
 
 if __name__ == "__main__":
-    image_path = "/Users/a1111/myproject/huiyu/huanshi/pig-detector-opencv/dataset/train/images/5d888da45cb117db331e40e966f7ce70.jpg"
+    image_path = "http://119.96.28.202:8094/huangshi-mini/media/pigdata/pig/57aca64f50a1c614a366132ec4fb188e.jpg"
     
     # 确保temp目录存在
     temp_dir = "temp"

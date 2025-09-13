@@ -99,29 +99,42 @@ def predict(req: PredictRequest):
         logger.exception("Prediction failed: %s", e)
         raise HTTPException(status_code=500, detail="Prediction failed")
     
-    # 分析检测结果，统计各类型数量
+    # 基于类别名/ID统计各类型数量（不再用长宽比推断）
     detection_summary = {"pig": 0, "ruler": 0, "scale": 0, "total": len(results)}
-    
-    # 假设results中包含class_id或class_name字段
-    # 如果没有，我们需要修改predict_image_with_model函数
-    for result in results:
-        # 这里需要根据实际的结果格式来判断类型
-        # 暂时基于检测框的特征来推断类型
-        box = result.get('box', [])
-        if len(box) == 4:
-            width = abs(box[2] - box[0])
-            height = abs(box[3] - box[1])
-            aspect_ratio = max(width, height) / min(width, height) if min(width, height) > 0 else 1
-            
-            # 简单的类型推断逻辑（需要根据实际模型输出调整）
-            if aspect_ratio > 5:  # 长条形，可能是尺子
-                detection_summary["ruler"] += 1
-            elif aspect_ratio < 2 and width * height > 10000:  # 较大的方形区域，可能是秤
-                detection_summary["scale"] += 1
-            else:  # 其他情况认为是猪
-                detection_summary["pig"] += 1
-    
-    # 确定主要检测类型
+    pig_box = None
+    ruler_box = None
+    base_box = None
+
+    def _cls_name_of(det):
+        # 统一获取类别名
+        if isinstance(det, dict):
+            name = det.get("class_name") or det.get("label") or det.get("name")
+            if name:
+                return str(name).lower()
+            # 回退用 class_id
+            cid = det.get("class_id")
+            if cid is not None:
+                m = {0: "pig", 1: "ruler", 2: "base"}
+                return m.get(cid, f"class_{cid}")
+        return "object"
+
+    for det in results or []:
+        box = det.get("box") if isinstance(det, dict) else None
+        if not box or len(box) != 4:
+            continue
+        name = _cls_name_of(det)
+        # 标准化名称
+        if "pig" in name:
+            detection_summary["pig"] += 1
+            pig_box = box if pig_box is None else pig_box
+        elif "ruler" in name:
+            detection_summary["ruler"] += 1
+            ruler_box = box if ruler_box is None else ruler_box
+        elif "base" in name or "scale" in name:
+            detection_summary["scale"] += 1
+            base_box = box if base_box is None else base_box
+
+    # 确定主要检测类型（优先 pig 其后 ruler 再 base/scale）
     if detection_summary["pig"] > 0:
         primary_type = "pig"
     elif detection_summary["ruler"] > 0:
@@ -130,8 +143,59 @@ def predict(req: PredictRequest):
         primary_type = "scale"
     else:
         primary_type = "other"
-    
-    logger.info("Prediction done, primary_type=%s, summary=%s", primary_type, detection_summary)
+
+    # 从 advanced_visualize 的思路：优先用尺子30cm，其次底座60x40cm换算长度
+    def _calc_len_from_ruler(pig_box, ruler_box, ruler_length_cm=30.0):
+        if not pig_box or not ruler_box:
+            return None
+        px = max(abs(pig_box[2]-pig_box[0]), abs(pig_box[3]-pig_box[1]))
+        rx = max(abs(ruler_box[2]-ruler_box[0]), abs(ruler_box[3]-ruler_box[1]))
+        if rx <= 0:
+            return None
+        scale = ruler_length_cm / rx  # cm/px
+        return px * scale
+
+    def _calc_len_from_base(pig_box, base_box, base_length_cm=60.0, base_width_cm=40.0):
+        if not pig_box or not base_box:
+            return None
+        px = max(abs(pig_box[2]-pig_box[0]), abs(pig_box[3]-pig_box[1]))
+        bw = abs(base_box[2]-base_box[0])
+        bh = abs(base_box[3]-base_box[1])
+        if bw <= 0 and bh <= 0:
+            return None
+        # 取底座的长边对应60cm
+        if bw >= bh and bw > 0:
+            scale = base_length_cm / bw
+        elif bh > 0:
+            scale = base_length_cm / bh
+        else:
+            return None
+        return px * scale
+
+    def _estimate_weight(length_cm):
+        if length_cm is None:
+            return None, None
+        k = 0.002
+        w = k * (float(length_cm) ** 2.5)
+        rng = (w * 0.8, w * 1.2)
+        return w, rng
+
+    length_cm = None
+    calculation_method = None
+    if pig_box is not None:
+        if ruler_box is not None:
+            length_cm = _calc_len_from_ruler(pig_box, ruler_box, 30.0)
+            calculation_method = "ruler_30cm"
+        if length_cm is None and base_box is not None:
+            length_cm = _calc_len_from_base(pig_box, base_box, 60.0, 40.0)
+            calculation_method = "base_60x40cm"
+
+    weight_kg, weight_range = _estimate_weight(length_cm)
+
+    logger.info(
+        "Prediction done, primary_type=%s, summary=%s, length_cm=%s, method=%s",
+        primary_type, detection_summary, f"{length_cm:.2f}" if length_cm else None, calculation_method
+    )
 
     # 可视化并尝试上传至 Minio（若配置存在）
     result_image_url = None
@@ -221,6 +285,10 @@ def predict(req: PredictRequest):
         "type": primary_type,
         "detection_summary": detection_summary,
         "results": results,
+        "length_cm": length_cm,
+        "weight_kg": weight_kg,
+        "weight_range": weight_range,
+        "calculation_method": calculation_method,
         "result_image_url": result_image_url
     }
 
@@ -255,7 +323,24 @@ def _read_image_any(image_path: str) -> np.ndarray:
 
 
 def _draw_results_on_image(img: np.ndarray, results):
+    # 为绘制长度/重量，需要先识别 pig/ruler/base 三类盒子
     out = img.copy()
+
+    def _cls_name_of(det):
+        name = None
+        if isinstance(det, dict):
+            name = det.get("class_name") or det.get("label") or det.get("name")
+            if not name and det.get("class_id") is not None:
+                m = {0: "pig", 1: "ruler", 2: "base"}
+                name = m.get(det["class_id"], f"class_{det['class_id']}")
+        return (name or "object").lower()
+
+    pig_box = None
+    ruler_box = None
+    base_box = None
+
+    # 先画框，顺便记录目标框
+    drawn = []
     for det in results or []:
         box = det.get("box") if isinstance(det, dict) else None
         if not box or len(box) != 4:
@@ -265,13 +350,22 @@ def _draw_results_on_image(img: np.ndarray, results):
         except Exception:
             continue
 
-        cls_name = None
-        score = None
-        if isinstance(det, dict):
-            cls_name = det.get("class_name") or det.get("label") or det.get("name") or "object"
-            score = det.get("score") or det.get("confidence")
+        cls_name = det.get("class_name") or det.get("label") or det.get("name") or "object"
+        score = det.get("score") or det.get("confidence")
+        name_low = _cls_name_of(det)
 
-        color = (0, 255, 0)  # 绿色框
+        # 简单配色
+        color = (0, 255, 0)  # 默认绿
+        if "ruler" in name_low:
+            color = (255, 0, 0)  # 蓝->BGR：这里用红色区分
+            ruler_box = ruler_box or [x1, y1, x2, y2]
+        elif "base" in name_low or "scale" in name_low:
+            color = (0, 165, 255)  # 橙
+            base_box = base_box or [x1, y1, x2, y2]
+        elif "pig" in name_low:
+            color = (0, 255, 0)  # 绿
+            pig_box = pig_box or [x1, y1, x2, y2]
+
         cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
 
         text = cls_name or "object"
@@ -283,8 +377,73 @@ def _draw_results_on_image(img: np.ndarray, results):
 
         (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
         y_text = max(y1 - 10, th + 4)
-        cv2.rectangle(out, (x1, y_text - th - 4), (x1 + tw + 4, y_text + baseline - 2), (0, 255, 0), -1)
+        cv2.rectangle(out, (x1, y_text - th - 4), (x1 + tw + 4, y_text + baseline - 2), color, -1)
         cv2.putText(out, text, (x1 + 2, y_text - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2, cv2.LINE_AA)
+
+        drawn.append((name_low, (x1, y1, x2, y2), color))
+
+    # 计算长度和重量，并在猪框旁显示
+    def _calc_len_from_ruler(pig_box, ruler_box, ruler_length_cm=30.0):
+        if not pig_box or not ruler_box:
+            return None
+        px = max(abs(pig_box[2]-pig_box[0]), abs(pig_box[3]-pig_box[1]))
+        rx = max(abs(ruler_box[2]-ruler_box[0]), abs(ruler_box[3]-ruler_box[1]))
+        if rx <= 0:
+            return None
+        return px * (ruler_length_cm / rx)
+
+    def _calc_len_from_base(pig_box, base_box, base_length_cm=60.0):
+        if not pig_box or not base_box:
+            return None
+        px = max(abs(pig_box[2]-pig_box[0]), abs(pig_box[3]-pig_box[1]))
+        bw = abs(base_box[2]-base_box[0])
+        bh = abs(base_box[3]-base_box[1])
+        if bw <= 0 and bh <= 0:
+            return None
+        scale = (base_length_cm / bw) if bw >= bh and bw > 0 else (base_length_cm / bh if bh > 0 else None)
+        return px * scale if scale else None
+
+    def _estimate_weight(length_cm):
+        if length_cm is None:
+            return None, None
+        k = 0.002
+        w = k * (float(length_cm) ** 2.5)
+        return w, (w*0.8, w*1.2)
+
+    length_cm = None
+    method = None
+    if pig_box is not None:
+        if ruler_box is not None:
+            length_cm = _calc_len_from_ruler(pig_box, ruler_box, 30.0)
+            method = "ruler_30cm"
+        if length_cm is None and base_box is not None:
+            length_cm = _calc_len_from_base(pig_box, base_box, 60.0)
+            method = "base_60x40cm"
+    weight_kg, rng = _estimate_weight(length_cm)
+
+    # 在猪框上叠加长度/重量信息
+    if pig_box is not None and length_cm is not None:
+        x1, y1, x2, y2 = [int(v) for v in pig_box]
+        lines = [
+            f"Length: {length_cm:.1f} cm",
+            f"Weight: {weight_kg:.1f} kg ({rng[0]:.1f}-{rng[1]:.1f})" if weight_kg is not None else "Weight: -",
+            f"Method: {method or '-'}",
+        ]
+        # 计算背景尺寸
+        (tw1, th1), _ = cv2.getTextSize(lines[0], cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+        (tw2, th2), _ = cv2.getTextSize(lines[1], cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+        (tw3, th3), _ = cv2.getTextSize(lines[2], cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+        tw = max(tw1, tw2, tw3)
+        th = th1 + th2 + th3 + 12
+        y_text = max(y1 - 10, th + 4)
+        cv2.rectangle(out, (x1, y_text - th - 4), (x1 + tw + 12, y_text + 2), (0, 255, 0), -1)
+        y_cursor = y_text - th - 4 + 6 + th1
+        cv2.putText(out, lines[0], (x1 + 6, y_cursor), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 2, cv2.LINE_AA)
+        y_cursor += th2
+        cv2.putText(out, lines[1], (x1 + 6, y_cursor), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 2, cv2.LINE_AA)
+        y_cursor += th3
+        cv2.putText(out, lines[2], (x1 + 6, y_cursor), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 2, cv2.LINE_AA)
+
     return out
 
 
