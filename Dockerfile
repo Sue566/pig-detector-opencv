@@ -9,4 +9,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -i $PIP_INDEX_URL -r requirements.txt
 
 COPY . .
+
+# Expose port 8092 for the FastAPI service
+EXPOSE 8092
+
 CMD ["bash", "start_api.sh"]

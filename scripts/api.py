@@ -18,7 +18,7 @@ app = FastAPI(title="Pig Detector API")
 
 # Use project root for default config and weights paths
 CFG_PATH = Path(os.environ.get("CFG_PATH", ROOT / "config.yaml")).resolve()
-WEIGHTS_PATH = Path(os.environ.get("WEIGHTS_PATH", ROOT / "models" / "best_model.pth")).resolve()
+WEIGHTS_PATH = Path(os.environ.get("WEIGHTS_PATH", ROOT / "models" / "v1_model.pth")).resolve()
 
 # Load the model once at startup
 logger.info("Loading model from %s", WEIGHTS_PATH)
@@ -61,7 +61,7 @@ def version():
 if __name__ == "__main__":
     import uvicorn
     host = "0.0.0.0"
-    port = 8000
+    port = 8092
     logger.info("Starting API on %s:%s", host, port)
     uvicorn.run(app, host=host, port=port)
 

@@ -9,4 +9,5 @@ torchvision
 onnx
 fastapi
 uvicorn
+pydantic
 requests
