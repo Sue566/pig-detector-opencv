@@ -3,9 +3,14 @@ from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 import os
 import sys
+import time
+import urllib.parse
 import requests
 import cv2
 import numpy as np
+import yaml
+from minio import Minio
+from minio.error import S3Error
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +32,52 @@ WEIGHTS_PATH = Path(os.environ.get("WEIGHTS_PATH", ROOT / "models" / "v1_model.p
 logger.info("Loading model from %s", WEIGHTS_PATH)
 MODEL, MODEL_META = load_model(str(CFG_PATH), str(WEIGHTS_PATH))
 logger.info("Model loaded")
+
+# 读取 Minio 配置（从 config.yaml）
+def _load_minio_config(cfg_path: Path):
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        minio_cfg = (cfg.get("minio") or {}) if isinstance(cfg, dict) else {}
+        url = str(minio_cfg.get("url") or "").rstrip("/")
+        access_key = minio_cfg.get("accessKey")
+        secret_key = minio_cfg.get("secretKey")
+        bucket = minio_cfg.get("bucketName")
+        if not (url and access_key and secret_key and bucket):
+            logger.warning("Minio config is incomplete or missing in %s", cfg_path)
+            return None
+        return {
+            "url": url,
+            "access_key": access_key,
+            "secret_key": secret_key,
+            "bucket": bucket,
+        }
+    except Exception as e:
+        logger.warning("Failed to load minio config: %s", e)
+        return None
+
+MINIO_CFG = _load_minio_config(CFG_PATH)
+
+def _make_minio_client(cfg):
+    if not cfg:
+        return None
+    # 解析 host/port/secure
+    try:
+        parsed = urllib.parse.urlparse(cfg["url"])
+        secure = parsed.scheme == "https"
+        endpoint = parsed.netloc
+        client = Minio(
+            endpoint=endpoint,
+            access_key=cfg["access_key"],
+            secret_key=cfg["secret_key"],
+            secure=secure,
+        )
+        return client, secure
+    except Exception as e:
+        logger.warning("Create Minio client failed: %s", e)
+        return None
+
+MINIO_CLIENT_SECURE = _make_minio_client(MINIO_CFG)
 
 
 class PredictRequest(BaseModel):
@@ -81,11 +132,96 @@ def predict(req: PredictRequest):
         primary_type = "other"
     
     logger.info("Prediction done, primary_type=%s, summary=%s", primary_type, detection_summary)
-    
+
+    # 可视化并尝试上传至 Minio（若配置存在）
+    result_image_url = None
+    try:
+        # 读取原图（兼容本地/URL）
+        img = _read_image_any(req.image_path)
+        vis = _draw_results_on_image(img, results)
+
+        # 准备文件名：原名 + _pred_时间戳 + 原扩展（默认为 .jpg）
+        # 从 URL 或本地路径中解析原始文件名
+        parsed_name = None
+        if req.image_path.startswith("http://") or req.image_path.startswith("https://"):
+            # 处理 query 里的 prefix=media%2F...%2Fxxx.jpg
+            parsed = urllib.parse.urlparse(req.image_path)
+            q = urllib.parse.parse_qs(parsed.query)
+            prefix_vals = q.get("prefix") or []
+            if prefix_vals:
+                decoded = urllib.parse.unquote(prefix_vals[0])
+                parsed_name = decoded.split("/")[-1]
+            if not parsed_name:
+                parsed_name = os.path.basename(parsed.path) or "image.jpg"
+        else:
+            parsed_name = os.path.basename(req.image_path)
+
+        name, ext = os.path.splitext(parsed_name)
+        if not ext:
+            ext = ".jpg"
+        ts = int(time.time())
+        out_name = f"{name}_pred_{ts}{ext}"
+
+        # 推测原对象的目录前缀（如果 URL 带 prefix=media/... 则沿用该目录）
+        object_prefix = ""
+        if req.image_path.startswith("http://") or req.image_path.startswith("https://"):
+            parsed = urllib.parse.urlparse(req.image_path)
+            q = urllib.parse.parse_qs(parsed.query)
+            prefix_vals = q.get("prefix") or []
+            if prefix_vals:
+                decoded = urllib.parse.unquote(prefix_vals[0])
+                # 去掉文件名得到目录
+                object_prefix = "/".join(decoded.split("/")[:-1]).rstrip("/")
+        else:
+            # 本地路径不清楚远端目录，默认根目录
+            object_prefix = ""
+
+        object_name = f"{object_prefix}/{out_name}" if object_prefix else out_name
+
+        # 编码为 JPEG（更小），若原扩展是 png 也可转 jpg
+        ok, buf = cv2.imencode(".jpg", vis, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+        if not ok:
+            raise ValueError("图像编码失败")
+
+        if MINIO_CFG and MINIO_CLIENT_SECURE:
+            client, secure = MINIO_CLIENT_SECURE
+            bucket = MINIO_CFG["bucket"]
+
+            # 确保桶存在（若无权限可略过此步骤失败）
+            try:
+                if not client.bucket_exists(bucket):
+                    client.make_bucket(bucket)
+            except S3Error as e:
+                # 桶可能已存在或无权限创建，记录日志后继续
+                logger.info("Bucket check/create: %s", e)
+
+            # 上传对象
+            from io import BytesIO
+            data_stream = BytesIO(buf.tobytes())
+            data_stream.seek(0)
+            client.put_object(
+                bucket_name=bucket,
+                object_name=object_name,
+                data=data_stream,
+                length=len(data_stream.getbuffer()),
+                content_type="image/jpeg",
+            )
+
+            # 生成可访问 URL（基于配置的 base url 与路径拼接）
+            base = MINIO_CFG["url"].rstrip("/")
+            # 常见公开访问/网关路径：/api/v1/buckets/{bucket}/objects/download?preview=true&prefix=...
+            # 若你的现有可访问 URL 规则不同，可在此调整
+            # 这里沿用你提供的风格，构建一个 preview 下载 URL
+            prefix_q = urllib.parse.quote(object_name, safe="")
+            result_image_url = f"{base}/api/v1/buckets/{bucket}/objects/download?preview=true&prefix={prefix_q}"
+    except Exception as e:
+        logger.warning("Visualization/Upload skipped: %s", e)
+
     return {
         "type": primary_type,
         "detection_summary": detection_summary,
-        "results": results
+        "results": results,
+        "result_image_url": result_image_url
     }
 
 

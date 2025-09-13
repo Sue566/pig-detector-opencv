@@ -8,3 +8,11 @@ num_epochs: 50             # 10 太少了，50-100 比较合理
 learning_rate: 0.001
 model_dir: models
 negative_dir: dataset/negative   # 如果有负样本，写上
+
+
+# 应用配置
+minio:
+  url: http://119.96.28.202:8094
+  accessKey: huangshiMinio
+  secretKey: huangshiMinioPsswordIs@9527
+  bucketName: huangshi-mini
