@@ -89,15 +89,24 @@ class PredictRequest(BaseModel):
 @app.post("/api/predict")
 def predict(req: PredictRequest):
     logger.info("/predict called with %s", req.image_path)
+    
+    # 验证输入参数
+    if not req.image_path or req.image_path.strip() == "":
+        raise HTTPException(status_code=400, detail="image_path cannot be empty")
+    
     try:
         results = predict_image_with_model(
             MODEL, req.image_path, conf=req.conf, top_k=req.top_k
         )
-    except FileNotFoundError:
+    except FileNotFoundError as e:
+        logger.error("Image not found: %s", e)
         raise HTTPException(status_code=400, detail=f"Image not found: {req.image_path}")
+    except requests.RequestException as e:
+        logger.error("Failed to download image: %s", e)
+        raise HTTPException(status_code=400, detail=f"Failed to download image from URL: {req.image_path}")
     except Exception as e:
         logger.exception("Prediction failed: %s", e)
-        raise HTTPException(status_code=500, detail="Prediction failed")
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
     
     # 基于类别名/ID统计各类型数量（不再用长宽比推断）
     detection_summary = {"pig": 0, "ruler": 0, "scale": 0, "total": len(results)}
@@ -426,7 +435,7 @@ def _draw_results_on_image(img: np.ndarray, results):
         x1, y1, x2, y2 = [int(v) for v in pig_box]
         lines = [
             f"Length: {length_cm:.1f} cm",
-            f"Weight: {weight_kg:.1f} kg ({rng[0]:.1f}-{rng[1]:.1f})" if weight_kg is not None else "Weight: -",
+            f"Weight: {weight_kg:.1f} kg ({rng[0]:.1f}-{rng[1]:.1f})" if weight_kg is not None and rng is not None else "Weight: -",
             f"Method: {method or '-'}",
         ]
         # 计算背景尺寸

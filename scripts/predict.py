@@ -83,19 +83,37 @@ def _ensure_requests():
 
 
 def _download_if_url(image_path: str):
-    """Download image if given a URL. Returns local path and temp dir."""
+    """Download image if given a URL. Returns (local_path, temp_dir)."""
     if image_path.startswith("http://") or image_path.startswith("https://"):
         _ensure_requests()
         timestamp = str(int(time.time()))
         temp_dir = ROOT / "temp" / timestamp
         temp_dir.mkdir(parents=True, exist_ok=True)
-        local_path = temp_dir / Path(image_path).name
-        resp = requests.get(image_path, stream=True)
-        resp.raise_for_status()
-        with open(local_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                f.write(chunk)
-        return str(local_path), temp_dir
+        # 更稳健的本地文件名解析（去掉查询串）
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(image_path)
+            fname = Path(parsed.path).name or f"image_{timestamp}.jpg"
+        except Exception:
+            fname = Path(image_path).name or f"image_{timestamp}.jpg"
+        local_path = temp_dir / fname
+        try:
+            # 增加超时，流式下载，过滤空块
+            with requests.get(image_path, stream=True, timeout=15) as resp:
+                resp.raise_for_status()
+                with open(local_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+            # 最基本的有效性检查
+            if not local_path.exists() or local_path.stat().st_size == 0:
+                raise RuntimeError(f"Downloaded empty file from URL: {image_path}")
+            return str(local_path), temp_dir
+        except Exception:
+            # 失败清理临时目录
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
     return image_path, None
 
 
@@ -103,7 +121,16 @@ def predict_image_with_model(model, image_path: str, *, conf: float = 0.5, top_k
     """Run inference with a pre-loaded model."""
     _ensure_deps_loaded()
     local_path, temp_dir = _download_if_url(image_path)
-    img = Image.open(local_path).convert('RGB')
+    try:
+        img = Image.open(local_path).convert('RGB')
+    except FileNotFoundError as e:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        raise FileNotFoundError(f"Image not found: {local_path}") from e
+    except Exception as e:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        raise RuntimeError(f"Failed to open image: {local_path}, err={e}") from e
     tensor = F.to_tensor(img)
     outputs = model([tensor])[0]
     boxes = outputs['boxes'].detach().numpy()
@@ -159,10 +186,13 @@ def draw_boxes_on_image(image_path, results, output_path=None):
     try:
         _ensure_deps_loaded()
         
-        # 读取图片
-        img = cv2.imread(image_path)
+        # 读取图片（支持URL）
+        local_path, tmp = _download_if_url(image_path)
+        img = cv2.imread(local_path)
         if img is None:
             print(f"无法读取图片: {image_path}")
+            if tmp:
+                shutil.rmtree(tmp, ignore_errors=True)
             return
     
         # 在图片上绘制边界框
@@ -191,6 +221,9 @@ def draw_boxes_on_image(image_path, results, output_path=None):
             cv2.imshow("Detection Result", img)
             cv2.waitKey(0)
             cv2.destroyAllWindows()
+        # 清理下载的临时目录
+        if 'tmp' in locals() and tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
     except ImportError:
         print("无法绘制边界框: 未安装OpenCV库")
         print("请运行以下命令安装OpenCV:")
