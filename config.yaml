@@ -2,7 +2,7 @@ train_dirs:
   - dataset/train
 val_dirs:
   - dataset/val
-num_classes: 3             # 因为只有一个类别 "pig"
+num_classes: 3             #
 batch_size: 4
 num_epochs: 50             # 10 太少了，50-100 比较合理
 learning_rate: 0.001

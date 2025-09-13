@@ -276,7 +276,7 @@ def draw_detection_boxes(image_path, output_path=None):
         return False
 
 if __name__ == "__main__":
-    image_path = "http://119.96.28.202:8094/huangshi-mini/media/pigdata/pig/57aca64f50a1c614a366132ec4fb188e.jpg"
+    image_path = "http://119.96.28.202:8094/huangshi-mini/media/pigdata/pig/6ffd2a19045077324e3eda50cd6612aa.jpg"
     
     # 确保temp目录存在
     temp_dir = "temp"

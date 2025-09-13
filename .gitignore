@@ -13,3 +13,4 @@ logs/
 dataset
 dataset/*
 *.tar
+.idea
