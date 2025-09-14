@@ -6,6 +6,7 @@ import sys
 sys.path.append('.')
 
 from utils.measurement_utils import calculate_pig_measurements
+from utils.measurement_utils import estimate_pig_weight
 
 def test_weight_calculations():
     """测试不同长度下的体重计算结果"""
@@ -78,6 +79,19 @@ def test_specific_lengths():
     else:
         print("❌ 无法计算体重")
 
+
+def test_range_varies_with_length():
+    """不同长度应产生不同的体重范围宽度"""
+    small_weight, small_range = estimate_pig_weight(40)
+    big_weight, big_range = estimate_pig_weight(100)
+
+    small_margin = (small_range[1] - small_range[0]) / small_weight
+    big_margin = (big_range[1] - big_range[0]) / big_weight
+
+    assert small_margin < big_margin
+
+
 if __name__ == "__main__":
     test_weight_calculations()
     test_specific_lengths()
+    test_range_varies_with_length()

@@ -236,12 +236,30 @@ def calculate_pig_length_from_base(pig_box: List[float], base_box: List[float],
         return None
 
 
-def estimate_pig_weight(length_cm: Optional[float], k: float = 0.002, 
-                       error_pct: float = 0.20) -> Tuple[Optional[float], Optional[Tuple[float, float]]]:
-    """估计重量：weight (kg) = k * length(cm) ** 2.5"""
+def estimate_pig_weight(length_cm: Optional[float],
+                       error_pct: float = 0.25) -> Tuple[Optional[float], Optional[Tuple[float, float]]]:
+    """根据长度估算猪的重量
+
+    使用分段多项式估算公式，兼顾幼猪和大体型猪：
+
+    - 对于小型/幼猪（<80cm），使用常数 ``k=6e-5``
+    - 对于大型猪（>=80cm），使用常数 ``k=8e-5``
+
+    重量公式： ``weight = k * length_cm ** 3``
+
+    Args:
+        length_cm: 猪的估计长度（厘米）
+        error_pct: 估算误差百分比，默认25%
+
+    Returns:
+        (重量估计值kg, (下限kg, 上限kg))，若无法计算则返回(None, None)
+    """
+
     if length_cm is None:
         return None, None
-    est = k * (length_cm ** 2.5)
+
+    k = 6e-5 if length_cm < 80 else 8e-5
+    est = k * (length_cm ** 3)
     return est, (est * (1 - error_pct), est * (1 + error_pct))
 
 

@@ -102,60 +102,48 @@ def calculate_pig_length_from_base(pig_box, base_box, base_length_cm=60, base_wi
 
 def estimate_pig_weight(length_cm, formula_type="standard"):
     """
-    根据猪的长度估算重量
-    
+    根据猪的长度估算重量，兼顾幼猪与大体型猪。
+
+    使用多项式公式 ``weight = k * length_cm ** 3``，并根据长度切换系数：
+
+    - 当长度 < 80cm 时，``k = 6e-5``（适用于2-15kg范围的幼猪）
+    - 当长度 ≥ 80cm 时，``k = 8e-5``（适用于更大体型猪）
+
+    ``formula_type`` 可用于微调结果：
+    - ``young_pig``: 结果乘以0.9（偏保守）
+    - ``medium_pig``: 结果乘以1.1（偏积极）
+
     Args:
         length_cm: 猪的长度(cm)
-        formula_type: 计算公式类型 ("standard", "young_pig", "medium_pig")
-    
+        formula_type: 估算模式 ("standard", "young_pig", "medium_pig")
+
     Returns:
-        tuple: (估算重量(kg), (最小重量, 最大重量))
+        tuple: (估算重量kg, (最小重量kg, 最大重量kg))
     """
     if length_cm is None:
         return None, None
-    
-    # 针对您数据集中猪的体重范围优化 (2.5-3.78kg)
-    # 基于实际数据分布调整公式参数
-    formulas = {
-        # 标准公式 - 针对2.5-3.78kg体重范围优化
-        "standard": {
-            "base_weight": 2.5,      # 基础体重2.5kg
-            "length_factor": 0.035,  # 长度影响系数
-            "length_threshold": 30,  # 基准长度30cm
-            "variance": 0.12         # 12%的变化范围
-        },
-        # 保守估算 - 倾向于较低体重
-        "young_pig": {
-            "base_weight": 2.3,
-            "length_factor": 0.028,
-            "length_threshold": 30,
-            "variance": 0.10
-        },
-        # 积极估算 - 倾向于较高体重
-        "medium_pig": {
-            "base_weight": 2.7,
-            "length_factor": 0.042,
-            "length_threshold": 30,
-            "variance": 0.15
-        }
-    }
-    
-    formula = formulas.get(formula_type, formulas["standard"])
-    
-    # 线性公式：重量(kg) = base_weight + length_factor * (长度 - threshold)
-    # 这样可以更好地控制在2.5-3.78kg范围内
-    length_diff = max(0, length_cm - formula["length_threshold"])
-    estimated_weight = formula["base_weight"] + formula["length_factor"] * length_diff
-    
-    # 确保体重为正值
-    estimated_weight = max(0.5, estimated_weight)
-    
-    # 给出重量范围
-    variance = formula["variance"]
-    weight_min = max(1.5, estimated_weight * (1 - variance))
-    weight_max = min(8.0, estimated_weight * (1 + variance))
-    
-    return estimated_weight, (weight_min, weight_max)
+
+    k = 6e-5 if length_cm < 80 else 8e-5
+    est = k * (length_cm ** 3)
+
+    if formula_type == "young_pig":
+        est *= 0.9
+    elif formula_type == "medium_pig":
+        est *= 1.1
+
+    # 根据长度动态调整估算范围
+    if length_cm < 50:
+        margin = 0.15
+    elif length_cm < 80:
+        margin = 0.20
+    elif length_cm < 110:
+        margin = 0.30
+    else:
+        margin = 0.40
+
+    weight_min = est * (1 - margin)
+    weight_max = est * (1 + margin)
+    return est, (weight_min, weight_max)
 
 def calculate_pig_measurements(pig_box, ruler_box=None, base_box=None, 
                              ruler_length_cm=30, base_length_cm=60, base_width_cm=40,
@@ -229,7 +217,7 @@ def format_measurement_text(measurements):
             
             if measurements["weight_range"]:
                 weight_min, weight_max = measurements["weight_range"]
-                texts.append(f"范围: {weight_min:.1f}-{weight_max:.1f}kg")
+                texts.append(f"范围: {weight_min:.1f}-{weight_max:.1f}kg (随长度变化)")
         
         texts.append(f"方法: {measurements['calculation_method']}")
         texts.append(f"置信度: {measurements['confidence']}")
